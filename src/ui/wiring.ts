@@ -587,33 +587,77 @@ export function attachAll(): void {
   const setBtn = document.getElementById('n365-settings-btn');
   const setMd = document.getElementById('n365-settings-md');
   const setKey = document.getElementById('n365-set-aikey') as HTMLInputElement | null;
+  const setProv = document.getElementById('n365-set-provider') as HTMLSelectElement | null;
+  const setClaudeModel = document.getElementById('n365-set-claude-model') as HTMLSelectElement | null;
+  const setPxaiModel = document.getElementById('n365-set-pxai-model') as HTMLSelectElement | null;
+  const setPxaiKey = document.getElementById('n365-set-pxai-key') as HTMLInputElement | null;
   const setDensity = document.getElementById('n365-set-density') as HTMLSelectElement | null;
   const setTheme = document.getElementById('n365-set-theme') as HTMLSelectElement | null;
-  if (setBtn && setMd && setKey && setDensity && setTheme) {
+  if (setBtn && setMd && setKey && setProv && setClaudeModel && setPxaiModel && setPxaiKey && setDensity && setTheme) {
+    // Populate model dropdowns once.
+    void import('../api/ai-settings').then((ai) => {
+      ai.CLAUDE_MODELS.forEach((m) => {
+        const o = document.createElement('option');
+        o.value = m.id; o.textContent = m.label;
+        setClaudeModel.appendChild(o);
+      });
+      ai.PXAI_MODELS.forEach((m) => {
+        const o = document.createElement('option');
+        o.value = m.id;
+        o.textContent = m.id + (m.reasoning ? ' (推論)' : '') + (m.vision ? ' 🖼' : '');
+        setPxaiModel.appendChild(o);
+      });
+    });
+
+    /** Show/hide rows based on the selected provider. Each conditional row
+     *  has a `data-prov` attribute matching the provider value. */
+    function syncProviderRows(): void {
+      const cur = setProv!.value;
+      document.querySelectorAll<HTMLElement>('.n365-set-row[data-prov]').forEach((row) => {
+        row.style.display = (row.dataset.prov === cur) ? '' : 'none';
+      });
+    }
+    setProv.addEventListener('change', syncProviderRows);
+
     setBtn.addEventListener('click', () => {
-      try {
-        setKey.value = localStorage.getItem('n365.aiKey') || '';
-        setDensity.value = localStorage.getItem('n365.density') || 'regular';
-        setTheme.value = localStorage.getItem('n365.theme') || 'light';
-      } catch { /* ignore */ }
-      setMd.classList.add('on');
+      void import('../api/ai-settings').then((ai) => {
+        try {
+          setProv.value = ai.getProvider();
+          setClaudeModel.value = ai.getClaudeModel();
+          setPxaiModel.value = ai.getPxAiModel();
+          setKey.value = localStorage.getItem('n365.aiKey') || '';
+          setPxaiKey.value = ai.getPxAiKey();
+          setDensity.value = localStorage.getItem('n365.density') || 'regular';
+          setTheme.value = localStorage.getItem('n365.theme') || 'light';
+        } catch { /* ignore */ }
+        syncProviderRows();
+        setMd.classList.add('on');
+      });
     });
     setMd.addEventListener('click', (e) => { if (e.target === setMd) setMd.classList.remove('on'); });
     document.getElementById('n365-set-cancel')?.addEventListener('click', () => setMd.classList.remove('on'));
     document.getElementById('n365-set-save')?.addEventListener('click', () => {
-      try {
-        if (setKey.value) localStorage.setItem('n365.aiKey', setKey.value);
-        else localStorage.removeItem('n365.aiKey');
-        localStorage.setItem('n365.density', setDensity.value);
-        localStorage.setItem('n365.theme', setTheme.value);
-      } catch { /* ignore */ }
-      const ov = document.getElementById('n365-overlay');
-      if (ov) {
-        ov.dataset.density = setDensity.value;
-        ov.dataset.theme = setTheme.value;
-      }
-      setMd.classList.remove('on');
-      toast('設定を保存しました');
+      void import('../api/ai-settings').then((ai) => {
+        try {
+          ai.setProvider(setProv.value as 'claude' | 'pxai');
+          if (setClaudeModel.value) ai.setClaudeModel(setClaudeModel.value);
+          if (setPxaiModel.value) ai.setPxAiModel(setPxaiModel.value);
+          if (setKey.value) localStorage.setItem('n365.aiKey', setKey.value);
+          else localStorage.removeItem('n365.aiKey');
+          ai.setPxAiKey(setPxaiKey.value);
+          localStorage.setItem('n365.density', setDensity.value);
+          localStorage.setItem('n365.theme', setTheme.value);
+        } catch { /* ignore */ }
+        const ov = document.getElementById('n365-overlay');
+        if (ov) {
+          ov.dataset.density = setDensity.value;
+          ov.dataset.theme = setTheme.value;
+        }
+        // Refresh the provider/model badge in the AI panel
+        void import('./ai-chat').then((m) => m.syncProviderBadge?.());
+        setMd.classList.remove('on');
+        toast('設定を保存しました');
+      });
     });
     // Apply on init
     try {
