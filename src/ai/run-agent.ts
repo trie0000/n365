@@ -51,17 +51,18 @@ export async function runAgent(
 
   for (let step = 0; step < MAX_STEPS; step++) {
     if (signal?.aborted) throw new Error('aborted');
-    // Provider dispatch: Claude API or PX-AI. Both backends speak the same
-    // ClaudeResponse shape thanks to the translation layer in openai-px.ts,
-    // so the rest of this loop (tool execution, history building) is unchanged.
-    const { getProvider, getClaudeModel, getPxAiModel } = await import('../api/ai-settings');
+    // Provider dispatch: Claude API or 社用AI API. Both backends speak the
+    // same ClaudeResponse shape thanks to the translation layer in
+    // openai-corp.ts, so the rest of this loop (tool execution, history
+    // building) is unchanged.
+    const { getProvider, getClaudeModel, getCorpAiModel } = await import('../api/ai-settings');
     const provider = getProvider();
-    const res = provider === 'pxai'
-      ? await (await import('../api/openai-px')).pxaiChatRaw({
+    const res = provider === 'corp'
+      ? await (await import('../api/openai-corp')).corpAiChatRaw({
           messages: working,
           system: systemPrompt,
           tools: TOOL_DEFS,
-          model: getPxAiModel(),
+          model: getCorpAiModel(),
           signal,
           stream: onTextDelta ? { onText: onTextDelta } : undefined,
         })
