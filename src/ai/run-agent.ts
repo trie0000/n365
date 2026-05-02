@@ -51,17 +51,28 @@ export async function runAgent(
 
   for (let step = 0; step < MAX_STEPS; step++) {
     if (signal?.aborted) throw new Error('aborted');
-    // Honor the user's model selection from settings; falls back to the
-    // anthropic.ts DEFAULT_MODEL when nothing is stored.
-    const { getClaudeModel } = await import('../api/ai-settings');
-    const res = await callClaudeRaw({
-      messages: working,
-      system: systemPrompt,
-      tools: TOOL_DEFS,
-      model: getClaudeModel(),
-      signal,
-      stream: onTextDelta ? { onText: onTextDelta } : undefined,
-    });
+    // Provider dispatch: Claude API or PX-AI. Both backends speak the same
+    // ClaudeResponse shape thanks to the translation layer in openai-px.ts,
+    // so the rest of this loop (tool execution, history building) is unchanged.
+    const { getProvider, getClaudeModel, getPxAiModel } = await import('../api/ai-settings');
+    const provider = getProvider();
+    const res = provider === 'pxai'
+      ? await (await import('../api/openai-px')).pxaiChatRaw({
+          messages: working,
+          system: systemPrompt,
+          tools: TOOL_DEFS,
+          model: getPxAiModel(),
+          signal,
+          stream: onTextDelta ? { onText: onTextDelta } : undefined,
+        })
+      : await callClaudeRaw({
+          messages: working,
+          system: systemPrompt,
+          tools: TOOL_DEFS,
+          model: getClaudeModel(),
+          signal,
+          stream: onTextDelta ? { onText: onTextDelta } : undefined,
+        });
 
     const assistantMsg: ApiMessage = { role: 'assistant', content: res.content };
     working.push(assistantMsg);
