@@ -1,7 +1,7 @@
 {
-  "name": "n365",
+  "name": "shapion",
   "version": "0.2.0",
-  "description": "SharePoint-backed Notion-like bookmarklet app",
+  "description": "Shapion — SharePoint-backed Notion-like bookmarklet app",
   "private": true,
   "scripts": {
     "build": "node build.js",

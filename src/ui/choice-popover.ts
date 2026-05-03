@@ -1,4 +1,4 @@
-// Generic single-choice popover styled like #n365-create-menu.
+// Generic single-choice popover styled like #shapion-create-menu.
 // Used by row-props (DB row detail panel) for choice columns and any other
 // single-pick UI where the native <select> dropdown looks out of place.
 
@@ -38,24 +38,24 @@ export function openChoicePopover(
   if (!overlay) return;
 
   const pop = document.createElement('div');
-  pop.className = 'n365-choice-pop';
+  pop.className = 'shapion-choice-pop';
 
   for (const it of choices) {
     const row = document.createElement('div');
-    row.className = 'n365-cp-item';
+    row.className = 'shapion-cp-item';
     const isSel = it.value === current;
     if (isSel) row.classList.add('sel');
     const ic = document.createElement('span');
-    ic.className = 'n365-cp-ic';
+    ic.className = 'shapion-cp-ic';
     ic.textContent = isSel ? '✓' : (it.icon || '');
     const lbl = document.createElement('span');
-    lbl.className = 'n365-cp-label';
+    lbl.className = 'shapion-cp-label';
     lbl.textContent = it.label || '—';
-    if (!it.label) lbl.classList.add('n365-cp-empty');
+    if (!it.label) lbl.classList.add('shapion-cp-empty');
     row.append(ic, lbl);
     if (it.sub) {
       const sub = document.createElement('span');
-      sub.className = 'n365-cp-sub';
+      sub.className = 'shapion-cp-sub';
       sub.textContent = it.sub;
       row.appendChild(sub);
     }

@@ -9,12 +9,9 @@ import { S } from '../state';
 import { toast, setLoad } from './ui-helpers';
 import { mdToHtml } from '../lib/markdown';
 import { listPageVersions, type PageVersion } from '../api/version-history';
+import { escapeHtml } from '../lib/html-escape';
 
-const MODAL_ID = 'n365-versions-md';
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+const MODAL_ID = 'shapion-versions-md';
 
 function formatDateTime(iso: string): string {
   if (!iso) return '';
@@ -33,21 +30,21 @@ function ensureModal(): HTMLElement {
   if (el) return el;
   el = document.createElement('div');
   el.id = MODAL_ID;
-  el.className = 'n365-versions-md';
+  el.className = 'shapion-versions-md';
   el.style.display = 'none';
   el.innerHTML =
-    '<div class="n365-versions-box">' +
-      '<div class="n365-versions-hd">' +
-        '<span class="n365-versions-title">📜 バージョン履歴</span>' +
-        '<button class="n365-versions-close" title="閉じる">×</button>' +
+    '<div class="shapion-versions-box">' +
+      '<div class="shapion-versions-hd">' +
+        '<span class="shapion-versions-title">📜 バージョン履歴</span>' +
+        '<button class="shapion-versions-close" title="閉じる">×</button>' +
       '</div>' +
-      '<div class="n365-versions-body"></div>' +
+      '<div class="shapion-versions-body"></div>' +
     '</div>';
-  (document.getElementById('n365-overlay') || document.body).appendChild(el);
+  (document.getElementById('shapion-overlay') || document.body).appendChild(el);
   el.addEventListener('click', (e) => {
     if (e.target === el) close();
   });
-  el.querySelector<HTMLElement>('.n365-versions-close')?.addEventListener('click', close);
+  el.querySelector<HTMLElement>('.shapion-versions-close')?.addEventListener('click', close);
   return el;
 }
 
@@ -58,16 +55,20 @@ function close(): void {
 }
 
 function onKey(e: KeyboardEvent): void {
-  if (e.key === 'Escape') close();
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    close();
+  }
 }
 
 export async function openVersionHistory(pageId: string, pageTitle: string): Promise<void> {
   const el = ensureModal();
-  const body = el.querySelector<HTMLElement>('.n365-versions-body');
-  const titleEl = el.querySelector<HTMLElement>('.n365-versions-title');
+  const body = el.querySelector<HTMLElement>('.shapion-versions-body');
+  const titleEl = el.querySelector<HTMLElement>('.shapion-versions-title');
   if (titleEl) titleEl.textContent = '📜 バージョン履歴: ' + pageTitle;
   if (!body) return;
-  body.innerHTML = '<div class="n365-versions-loading">読み込み中…</div>';
+  body.innerHTML = '<div class="shapion-versions-loading">読み込み中…</div>';
   el.style.display = 'flex';
   document.addEventListener('keydown', onKey, true);
 
@@ -75,32 +76,32 @@ export async function openVersionHistory(pageId: string, pageTitle: string): Pro
   try {
     versions = await listPageVersions(pageId);
   } catch (e) {
-    body.innerHTML = '<div class="n365-versions-error">取得失敗: ' + escapeHtml((e as Error).message) + '</div>';
+    body.innerHTML = '<div class="shapion-versions-error">取得失敗: ' + escapeHtml((e as Error).message) + '</div>';
     return;
   }
   if (versions.length === 0) {
-    body.innerHTML = '<div class="n365-versions-empty">バージョン履歴がありません。<br><span style="font-size:11px;color:var(--ink-3)">SP リストの「バージョン管理設定」がオフの可能性があります。</span></div>';
+    body.innerHTML = '<div class="shapion-versions-empty">バージョン履歴がありません。<br><span style="font-size:11px;color:var(--ink-3)">SP リストの「バージョン管理設定」がオフの可能性があります。</span></div>';
     return;
   }
 
   body.innerHTML = versions.map((v, idx) => {
     const preview = (v.body || '').replace(/\s+/g, ' ').slice(0, 120);
     const isCurrent = idx === 0;
-    return '<div class="n365-versions-item' + (isCurrent ? ' current' : '') + '" data-idx="' + idx + '">' +
-      '<div class="n365-versions-itemhd">' +
-        '<span class="n365-versions-label">v' + escapeHtml(v.versionLabel) + (isCurrent ? ' (現在)' : '') + '</span>' +
-        '<span class="n365-versions-time">' + formatDateTime(v.created) + '</span>' +
-        '<span class="n365-versions-editor">' + escapeHtml(v.editor || '不明') + '</span>' +
+    return '<div class="shapion-versions-item' + (isCurrent ? ' current' : '') + '" data-idx="' + idx + '">' +
+      '<div class="shapion-versions-itemhd">' +
+        '<span class="shapion-versions-label">v' + escapeHtml(v.versionLabel) + (isCurrent ? ' (現在)' : '') + '</span>' +
+        '<span class="shapion-versions-time">' + formatDateTime(v.created) + '</span>' +
+        '<span class="shapion-versions-editor">' + escapeHtml(v.editor || '不明') + '</span>' +
       '</div>' +
-      '<div class="n365-versions-preview">' + escapeHtml(preview || '(本文なし)') + '</div>' +
-      '<div class="n365-versions-actions">' +
-        '<button class="n365-btn s" data-act="preview">プレビュー</button>' +
-        (isCurrent ? '' : '<button class="n365-btn p" data-act="restore">この版に戻す</button>') +
+      '<div class="shapion-versions-preview">' + escapeHtml(preview || '(本文なし)') + '</div>' +
+      '<div class="shapion-versions-actions">' +
+        '<button class="shapion-btn s" data-act="preview">プレビュー</button>' +
+        (isCurrent ? '' : '<button class="shapion-btn p" data-act="restore">この版に戻す</button>') +
       '</div>' +
     '</div>';
   }).join('');
 
-  body.querySelectorAll<HTMLElement>('.n365-versions-item').forEach((itemEl) => {
+  body.querySelectorAll<HTMLElement>('.shapion-versions-item').forEach((itemEl) => {
     const idx = parseInt(itemEl.dataset.idx || '-1', 10);
     if (idx < 0) return;
     itemEl.addEventListener('click', async (e) => {
@@ -120,20 +121,20 @@ export async function openVersionHistory(pageId: string, pageTitle: string): Pro
 
 function showPreview(v: PageVersion): void {
   const w = document.createElement('div');
-  w.className = 'n365-versions-md on';
+  w.className = 'shapion-versions-md on';
   w.style.zIndex = '2147483649';
   w.innerHTML =
-    '<div class="n365-versions-box" style="max-width:760px">' +
-      '<div class="n365-versions-hd">' +
-        '<span class="n365-versions-title">v' + v.versionLabel + ' プレビュー</span>' +
-        '<button class="n365-versions-close">×</button>' +
+    '<div class="shapion-versions-box" style="max-width:760px">' +
+      '<div class="shapion-versions-hd">' +
+        '<span class="shapion-versions-title">v' + v.versionLabel + ' プレビュー</span>' +
+        '<button class="shapion-versions-close">×</button>' +
       '</div>' +
-      '<div class="n365-versions-fullpreview">' + mdToHtml(v.body) + '</div>' +
+      '<div class="shapion-versions-fullpreview">' + mdToHtml(v.body) + '</div>' +
     '</div>';
-  (document.getElementById('n365-overlay') || document.body).appendChild(w);
+  (document.getElementById('shapion-overlay') || document.body).appendChild(w);
   const c = (): void => { w.remove(); };
   w.addEventListener('click', (e) => { if (e.target === w) c(); });
-  w.querySelector<HTMLElement>('.n365-versions-close')?.addEventListener('click', c);
+  w.querySelector<HTMLElement>('.shapion-versions-close')?.addEventListener('click', c);
 }
 
 async function restoreVersion(pageId: string, v: PageVersion): Promise<void> {

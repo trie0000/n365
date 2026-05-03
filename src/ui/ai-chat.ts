@@ -3,11 +3,13 @@
 import { S } from '../state';
 import { g, getEd } from './dom';
 import { toast } from './ui-helpers';
-import { getApiKey, setApiKey, type ApiMessage, type ContentBlock, type TextBlock, type ToolUseBlock } from '../api/anthropic';
+import { getApiKey, type ApiMessage, type ContentBlock, type TextBlock, type ToolUseBlock } from '../api/anthropic';
 import { runAgent } from '../ai/run-agent';
 import { htmlToMd } from '../lib/markdown';
+import { escapeHtml } from '../lib/html-escape';
+import { nowJSTContext } from '../lib/date-utils';
+import { prefAiHistory, prefAiPaneOpen } from '../lib/prefs';
 
-const HISTORY_KEY = 'n365.ai.history';
 const MAX_HISTORY = 20;
 
 interface AiSession {
@@ -21,15 +23,14 @@ interface AiSession {
 }
 
 function loadHistory(): AiSession[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw) as AiSession[];
-  } catch { return []; }
+  const raw = prefAiHistory.get();
+  if (!raw) return [];
+  try { return JSON.parse(raw) as AiSession[]; }
+  catch { return []; }
 }
 
 function saveHistory(sessions: AiSession[]): void {
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(sessions.slice(0, MAX_HISTORY)));
+  prefAiHistory.set(JSON.stringify(sessions.slice(0, MAX_HISTORY)));
 }
 
 let _currentSessionId: string | null = null;
@@ -89,11 +90,20 @@ async function maybeGenerateTitle(): Promise<void> {
       '記号・引用符・「」は不要、タイトル本体のみ。語尾の句点も不要。\n\n' +
       '発話: ' + userMsg;
     let raw = '';
-    if (ai.getProvider() === 'corp') {
+    const provider = ai.getProvider();
+    if (provider === 'corp') {
       // Skip silently if no key — title generation is non-critical.
       if (!ai.getCorpAiKey()) return;
       const corp = await import('../api/openai-corp');
       raw = await corp.corpAiChatText({
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 60,
+      }).catch(() => '');
+    } else if (provider === 'local') {
+      // Local AI: skip if base URL or model isn't set.
+      if (!ai.getLocalAiBaseUrl() || !ai.getLocalAiModel()) return;
+      const local = await import('../api/openai-local');
+      raw = await local.localAiChatText({
         messages: [{ role: 'user', content: prompt }],
         maxTokens: 60,
       }).catch(() => '');
@@ -142,7 +152,7 @@ export function newAiSession(): void {
 }
 
 export function renderHistoryDropdown(): void {
-  const dd = document.getElementById('n365-ai-hist');
+  const dd = document.getElementById('shapion-ai-hist');
   if (!dd) return;
   const sessions = loadHistory();
   dd.innerHTML = '<option value="__new__">+ 新しい会話</option>' +
@@ -164,19 +174,9 @@ const QUICK_PROMPTS: Array<{ label: string; prompt: string }> = [
   { label: 'アクション抽出', prompt: 'このページの内容から、ToDo・アクションアイテムを箇条書きで抽出してください。' },
 ];
 
-/** Current JST date/time, day-of-week. Lets the AI resolve "今日" / "明日" /
- *  "来週末" etc. into concrete YYYY-MM-DD values. */
-function nowContext(): string {
-  const now = new Date();
-  const jst = new Date(now.getTime() + 9 * 3600 * 1000);
-  const y = jst.getUTCFullYear();
-  const mo = String(jst.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(jst.getUTCDate()).padStart(2, '0');
-  const hh = String(jst.getUTCHours()).padStart(2, '0');
-  const mm = String(jst.getUTCMinutes()).padStart(2, '0');
-  const dow = ['日', '月', '火', '水', '木', '金', '土'][jst.getUTCDay()];
-  return `現在の日時 (JST): ${y}-${mo}-${d} ${hh}:${mm} (${dow}曜日)`;
-}
+// Current JST date/time line — `nowJSTContext` lives in lib/date-utils
+// so the editor's saved-time label and AI prompt context share the
+// exact same formatting.
 
 function pageContext(): string {
   const id = S.currentId || '';
@@ -203,14 +203,14 @@ function systemPromptBlocks(): import('../api/anthropic').SystemBlock[] {
   const blocks: import('../api/anthropic').SystemBlock[] = [
     { type: 'text', text: STATIC_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
   ];
-  const dynamic: string[] = [nowContext()];
+  const dynamic: string[] = [nowJSTContext()];
   const page = pageContext();
   if (page) { dynamic.push(''); dynamic.push(page); }
   blocks.push({ type: 'text', text: dynamic.join('\n') });
   return blocks;
 }
 
-const STATIC_SYSTEM_PROMPT = `あなたは n365 (Notion風 SharePoint連携ノートアプリ) の AI アシスタントです。
+const STATIC_SYSTEM_PROMPT = `あなたは Shapion (Notion風 SharePoint連携ノートアプリ) の AI アシスタントです。
 簡潔で親しみやすい日本語で回答してください。
 
 ⚠️ ページの作成・更新・削除は必ずツールで実行すること:
@@ -249,13 +249,11 @@ const STATIC_SYSTEM_PROMPT = `あなたは n365 (Notion風 SharePoint連携ノ�
 - create_page の前に search_pages で重複確認すること
 - 削除や更新の前に user に意図を確認すること（ホスト側でも確認モーダルが出る）`;
 
-const AI_PANEL_KEY = 'n365.page.aiPane';
-
 export function openAiPanel(): void {
   S.ai.panelOpen = true;
   g('ai-panel').classList.add('on');
-  document.getElementById('n365-ai-btn')?.classList.add('on');
-  try { localStorage.setItem(AI_PANEL_KEY, '1'); } catch { /* ignore */ }
+  document.getElementById('shapion-ai-btn')?.classList.add('on');
+  prefAiPaneOpen.set('1');
   syncProviderBadge();
   void ensureApiKey();
   renderAiMessages();
@@ -265,14 +263,12 @@ export function openAiPanel(): void {
 export function closeAiPanel(): void {
   S.ai.panelOpen = false;
   g('ai-panel').classList.remove('on');
-  document.getElementById('n365-ai-btn')?.classList.remove('on');
-  try { localStorage.setItem(AI_PANEL_KEY, '0'); } catch { /* ignore */ }
+  document.getElementById('shapion-ai-btn')?.classList.remove('on');
+  prefAiPaneOpen.set('0');
 }
 
 export function applyAiPanelState(): void {
-  try {
-    if (localStorage.getItem(AI_PANEL_KEY) === '1') openAiPanel();
-  } catch { /* ignore */ }
+  if (prefAiPaneOpen.get() === '1') openAiPanel();
 }
 
 export function toggleAiPanel(): void {
@@ -282,44 +278,102 @@ export function toggleAiPanel(): void {
 
 async function ensureApiKey(): Promise<boolean> {
   const ai = await import('../api/ai-settings');
-  if (ai.getProvider() === 'corp') {
+  const provider = ai.getProvider();
+  if (provider === 'corp') {
     if (ai.getCorpAiKey()) return true;
-    const k = prompt('社用AI API のサブスクリプションキーを入力してください\n(設定からも変更できます)');
-    if (k && k.trim()) {
-      ai.setCorpAiKey(k.trim());
-      toast('社用AI API キーを保存しました');
-      return true;
-    }
+    toast('Azure OpenAI 互換 API キーが未設定です。サイドバーの「⚙ 設定」から設定してください', 'err');
     return false;
+  }
+  if (provider === 'local') {
+    // Local AI usually accepts any key (or none); only the base URL
+    // and a model name are mandatory. Everything else is enforced inside
+    // localAiChatRaw, which throws a friendly error.
+    if (!ai.getLocalAiBaseUrl()) {
+      toast('ローカル AI のベース URL が未設定です。サイドバーの「⚙ 設定」から設定してください', 'err');
+      return false;
+    }
+    if (!ai.getLocalAiModel()) {
+      toast('ローカル AI のモデル名が未設定です。サイドバーの「⚙ 設定」から指定してください', 'err');
+      return false;
+    }
+    return true;
   }
   // Claude
   if (getApiKey()) return true;
-  const key = prompt(
-    'Anthropic APIキーを入力してください\n(sk-ant-... で始まる文字列。https://console.anthropic.com/settings/keys から取得)',
-  );
-  if (key && key.trim()) {
-    setApiKey(key.trim());
-    toast('APIキーを保存しました');
-    return true;
-  }
+  toast('Claude API キーが未設定です。サイドバーの「⚙ 設定」から設定してください', 'err');
   return false;
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** Populate / refresh the model picker dropdown next to the chat input.
+ *  Each <option> encodes "<provider>:<modelId>" so a single change handler
+ *  can apply both provider and model in one shot. Exposed so the settings
+ *  modal can refresh after edits there. */
+export function syncProviderBadge(): void {
+  const sel = document.getElementById('shapion-ai-model-pick') as HTMLSelectElement | null;
+  if (!sel) return;
+  void import('../api/ai-settings').then((ai) => {
+    const provider = ai.getProvider();
+    const claudeModel = ai.getClaudeModel();
+    const corpModel = ai.getCorpAiModel();
+    const localModel = ai.getLocalAiModel();
+    const cur = provider + ':' + (
+      provider === 'corp' ? corpModel :
+      provider === 'local' ? localModel :
+      claudeModel
+    );
+    sel.innerHTML = '';
+    const claudeGroup = document.createElement('optgroup');
+    claudeGroup.label = 'Claude';
+    for (const m of ai.CLAUDE_MODELS) {
+      const o = document.createElement('option');
+      o.value = 'claude:' + m.id;
+      o.textContent = m.label;
+      claudeGroup.appendChild(o);
+    }
+    sel.appendChild(claudeGroup);
+    const corpGroup = document.createElement('optgroup');
+    corpGroup.label = 'Azure OpenAI 互換';
+    for (const m of ai.CORP_AI_MODELS) {
+      const o = document.createElement('option');
+      o.value = 'corp:' + m.id;
+      o.textContent = m.id;
+      corpGroup.appendChild(o);
+    }
+    sel.appendChild(corpGroup);
+    const localModels = ai.getLocalAiModels();
+    if (localModels.length > 0 || localModel) {
+      const localGroup = document.createElement('optgroup');
+      localGroup.label = 'ローカル AI';
+      // Combine: explicit list + currently-selected (in case it's not in the list yet)
+      const seen = new Set<string>();
+      for (const m of [localModel, ...localModels]) {
+        if (!m || seen.has(m)) continue;
+        seen.add(m);
+        const o = document.createElement('option');
+        o.value = 'local:' + m;
+        o.textContent = m;
+        localGroup.appendChild(o);
+      }
+      sel.appendChild(localGroup);
+    }
+    sel.value = cur;
+  });
 }
 
-/** Refresh the provider/model badge in the AI panel header. Exposed for
- *  the settings modal to call after the user changes provider. */
-export function syncProviderBadge(): void {
-  const el = document.getElementById('n365-ai-provider-badge');
-  if (!el) return;
-  void import('../api/ai-settings').then((ai) => {
-    const p = ai.getProvider();
-    const label = p === 'corp' ? '社用AI · ' + ai.getCorpAiModel() : 'Claude · ' + ai.getClaudeModel();
-    el.textContent = label;
-    el.dataset.provider = p;
-  });
+/** Apply a "provider:modelId" picker selection. Used by the chat-input
+ *  model dropdown's change handler. */
+export async function applyModelPick(value: string): Promise<void> {
+  const colonIdx = value.indexOf(':');
+  if (colonIdx < 0) return;
+  const provider = value.substring(0, colonIdx);
+  const modelId = value.substring(colonIdx + 1);
+  if (provider !== 'claude' && provider !== 'corp' && provider !== 'local') return;
+  const ai = await import('../api/ai-settings');
+  ai.setProvider(provider);
+  if (provider === 'claude') ai.setClaudeModel(modelId);
+  else if (provider === 'corp') ai.setCorpAiModel(modelId);
+  else if (provider === 'local') ai.setLocalAiModel(modelId);
+  syncProviderBadge();
 }
 
 function mdLineToHtml(line: string): string {
@@ -360,10 +414,10 @@ export function renderAiMessages(): void {
   list.innerHTML = '';
   if (S.ai.messages.length === 0) {
     const empty = document.createElement('div');
-    empty.className = 'n365-ai-empty';
+    empty.className = 'shapion-ai-empty';
     empty.innerHTML =
-      '<div class="n365-ai-empty-title">このページについて質問できます</div>' +
-      '<div class="n365-ai-empty-sub">下のチップから始めるか、自由に入力してください</div>';
+      '<div class="shapion-ai-empty-title">このページについて質問できます</div>' +
+      '<div class="shapion-ai-empty-sub">下のチップから始めるか、自由に入力してください</div>';
     list.appendChild(empty);
   }
   for (const m of S.ai.messages) {
@@ -371,15 +425,15 @@ export function renderAiMessages(): void {
     if (!summary) continue;        // skip tool_result-only frames
     if (!summary.text && summary.toolNames.length === 0) continue;
     const wrap = document.createElement('div');
-    wrap.className = 'n365-ai-row';
+    wrap.className = 'shapion-ai-row';
     const label = document.createElement('div');
-    label.className = 'n365-ai-label';
+    label.className = 'shapion-ai-label';
     label.textContent = m.role === 'user' ? 'あなた' : 'AI';
     const card = document.createElement('div');
-    card.className = 'n365-ai-msg n365-ai-' + m.role;
+    card.className = 'shapion-ai-msg shapion-ai-' + m.role;
     let html = summary.text ? renderMessageBody(summary.text) : '';
     if (summary.toolNames.length > 0) {
-      const trace = '<div class="n365-ai-trace">— 実行: ' +
+      const trace = '<div class="shapion-ai-trace">— 実行: ' +
         summary.toolNames.map((n) => '🔧 ' + escapeHtml(n)).join(' / ') + '</div>';
       html += trace;
     }
@@ -389,12 +443,12 @@ export function renderAiMessages(): void {
   }
   if (S.ai.loading) {
     const wrap = document.createElement('div');
-    wrap.className = 'n365-ai-row';
+    wrap.className = 'shapion-ai-row';
     const label = document.createElement('div');
-    label.className = 'n365-ai-label';
+    label.className = 'shapion-ai-label';
     label.textContent = 'AI';
     const card = document.createElement('div');
-    card.className = 'n365-ai-msg n365-ai-assistant n365-ai-loading';
+    card.className = 'shapion-ai-msg shapion-ai-assistant shapion-ai-loading';
     card.textContent = '考え中…';
     wrap.append(label, card);
     list.appendChild(wrap);
@@ -468,21 +522,21 @@ export async function sendAiMessage(text: string): Promise<void> {
 /** Render the streaming-text-only placeholder. Called per text delta. */
 function updateStreamingBubble(text: string): void {
   const list = g('ai-messages');
-  let bubble = document.getElementById('n365-ai-streaming') as HTMLElement | null;
+  let bubble = document.getElementById('shapion-ai-streaming') as HTMLElement | null;
   if (!bubble) {
     // Replace the existing 「考え中…」 loading bubble with a real text bubble
     const wrap = document.createElement('div');
-    wrap.className = 'n365-ai-row';
-    wrap.id = 'n365-ai-streaming-row';
+    wrap.className = 'shapion-ai-row';
+    wrap.id = 'shapion-ai-streaming-row';
     const label = document.createElement('div');
-    label.className = 'n365-ai-label';
+    label.className = 'shapion-ai-label';
     label.textContent = 'AI';
     bubble = document.createElement('div');
-    bubble.className = 'n365-ai-msg n365-ai-assistant';
-    bubble.id = 'n365-ai-streaming';
+    bubble.className = 'shapion-ai-msg shapion-ai-assistant';
+    bubble.id = 'shapion-ai-streaming';
     wrap.append(label, bubble);
     // Remove existing loading row if present
-    list.querySelectorAll('.n365-ai-loading').forEach((el) => el.parentElement?.remove());
+    list.querySelectorAll('.shapion-ai-loading').forEach((el) => el.parentElement?.remove());
     list.appendChild(wrap);
   }
   bubble.innerHTML = renderMessageBody(text);
@@ -491,7 +545,7 @@ function updateStreamingBubble(text: string): void {
 
 /** Switch the send button between "send" and "stop" appearance based on loading. */
 function updateSendButton(): void {
-  const btn = document.getElementById('n365-ai-send');
+  const btn = document.getElementById('shapion-ai-send');
   if (!btn) return;
   const loading = S.ai.loading;
   btn.classList.toggle('stop', loading);
@@ -515,12 +569,9 @@ export function clearAiHistory(): void {
   renderHistoryDropdown();
 }
 
+/** Deprecated — API キーはサイドバー「⚙ 設定」一本化。残骸 (export 互換) */
 export function configureApiKey(): void {
-  const cur = getApiKey() || '';
-  const next = prompt('Anthropic APIキー (空欄で削除):', cur);
-  if (next === null) return;
-  setApiKey(next.trim());
-  toast(next.trim() ? 'APIキーを更新しました' : 'APIキーを削除しました');
+  toast('API キーは「⚙ 設定」 (サイドバー) から設定してください');
 }
 
 export function getQuickPrompts(): typeof QUICK_PROMPTS {
