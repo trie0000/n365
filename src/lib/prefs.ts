@@ -88,6 +88,18 @@ export const prefCurrentWsUrl     = strPref('shapion.workspace.currentUrl');
 export const prefDensity          = strPref('shapion.density', 'regular');
 export const prefTheme            = strPref('shapion.theme', 'light');
 
+// ── Save / sync / presence ────────────────────────────────────────────
+// Stored as numeric strings so the existing strPref machinery works.
+// `prefSaveDelayMs` of '0' means "manual save only" (Cmd/Ctrl+S still works,
+// but autosave won't fire). Default 2000ms preserves prior behaviour.
+export const prefSaveDelayMs      = strPref('shapion.save.delayMs', '2000');
+// `prefSyncPollMs` of '0' means "don't poll" — useful for solo users who
+// don't need the "別タブで更新" banner. Default 30000ms preserves prior.
+export const prefSyncPollMs       = strPref('shapion.sync.pollMs', '30000');
+// `prefPresenceEnabled` '1' = on, '0' = off. Off skips both sending pings
+// (no SP writes from this tab) and reading the avatar list.
+export const prefPresenceEnabled  = strPref('shapion.presence.enabled', '1');
+
 // ── Editor / pages ────────────────────────────────────────────────────
 export const prefLastOpenedPages  = jsonPref<Record<string, string>>('shapion.lastOpenedPage', {});
 
@@ -163,6 +175,16 @@ export function prefCalDateField(listTitle: string) {
 }
 export function prefLastSavedBy(pageId: string) {
   return strPref(SAVED_BY_PREFIX + pageId);
+}
+
+/** Per-page "etag the user last viewed" — written every time doSelect
+ *  finishes loading a page. On the NEXT open, the freshly-loaded etag
+ *  is compared to this value: if different, a passive "前回見た時から
+ *  更新されました" notification appears at the top so silent remote
+ *  edits aren't missed. */
+const LAST_SEEN_ETAG_PREFIX = 'shapion.lastSeenEtag.';
+export function prefLastSeenEtag(pageId: string) {
+  return strPref(LAST_SEEN_ETAG_PREFIX + pageId);
 }
 
 // ── Drafts (the local-store one in ui/draft-store) ───────────────────
